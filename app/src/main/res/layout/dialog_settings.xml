@@ -19,25 +19,15 @@
         android:text="Check GitHub for a newer version of PEC Board."
         android:textSize="16sp" />
 
-    <Button android:id="@+id/addCardFromSettings" android:layout_width="match_parent"
-        android:layout_height="56dp" android:layout_marginTop="14dp"
-        android:text="Add Card"
-        android:contentDescription="Add a card" />
-
     <Button android:id="@+id/editCardFromSettings" android:layout_width="match_parent"
-        android:layout_height="56dp" android:layout_marginTop="10dp"
+        android:layout_height="56dp" android:layout_marginTop="14dp"
         android:text="Edit Card"
-        android:contentDescription="Edit a card" />
+        android:contentDescription="Add, edit, or remove a card" />
 
     <Button android:id="@+id/editCategoryFromSettings" android:layout_width="match_parent"
         android:layout_height="56dp" android:layout_marginTop="10dp"
         android:text="Edit Category"
         android:contentDescription="Create, rename, or remove a category" />
-
-    <Button android:id="@+id/removeCardFromSettings" android:layout_width="match_parent"
-        android:layout_height="56dp" android:layout_marginTop="10dp"
-        android:text="Remove card"
-        android:contentDescription="Remove a card" />
 
     <Button android:id="@+id/restoreDefaultCards" android:layout_width="match_parent"
         android:layout_height="56dp" android:layout_marginTop="10dp"
@@ -59,4 +49,3 @@
         android:text="Download update" android:visibility="gone" />
 </LinearLayout>
 </ScrollView>
-
