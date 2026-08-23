@@ -19,18 +19,22 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AlertDialog
 import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import com.example.myvoiceboard.databinding.ActivityMainBinding
 import com.google.android.material.chip.Chip
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
+import java.util.UUID
 
 data class PecCard(
     val label: String,
     val symbol: String,
     val category: String,
-    val imageUri: String? = null
+    val imageUri: String? = null,
+    val customId: String? = null,
+    val defaultKey: String? = null
 )
 
 class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
@@ -41,10 +45,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val defaultCategories = listOf("Core", "Food", "Feelings", "Activities")
     private val categories = defaultCategories.toMutableList()
     private var currentCategory = "Core"
+    private var coreCategoryName = "Core"
     private val customCards = mutableListOf<PecCard>()
     private val hiddenDefaultCards = mutableSetOf<String>()
+    private val defaultCardOverrides = mutableMapOf<String, PecCard>()
+    private val cardOrders = mutableMapOf<String, MutableList<String>>()
     private var pendingImageUri: Uri? = null
     private var pendingImageView: ImageView? = null
+    private var pendingRemoveImageButton: Button? = null
     private val imagePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             try {
@@ -57,6 +65,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 setImageURI(uri)
                 visibility = View.VISIBLE
             }
+            pendingRemoveImageButton?.visibility = View.VISIBLE
         }
     }
     private val defaultCards = listOf(
@@ -70,7 +79,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         PecCard("Quiet", "🤫", "Feelings"), PecCard("Break", "⏸️", "Activities"),
         PecCard("Bathroom", "🚻", "Activities"), PecCard("Play", "🧸", "Activities"),
         PecCard("Read", "📖", "Activities"), PecCard("Go outside", "🌳", "Activities")
-    )
+    ).map { card -> card.copy(defaultKey = "${card.category}\u001F${card.label}") }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,17 +88,45 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         tts = TextToSpeech(this, this)
         updateManager = AppUpdateManager(this)
         updateManager.start()
-        loadCustomCategories()
+        loadCategories()
+        loadCoreCategoryName()
         loadCustomCards()
+        loadDefaultCardOverrides()
         loadHiddenDefaultCards()
+        loadCardOrders()
 
         val span = if (resources.configuration.smallestScreenWidthDp >= 600) 5 else 3
         binding.board.layoutManager = GridLayoutManager(this, span)
-        setCategory("Core")
-        rebuildCategoryTabs("Core")
+        ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
+            ItemTouchHelper.UP or ItemTouchHelper.DOWN or ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT,
+            0
+        ) {
+            override fun onMove(
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder,
+                target: RecyclerView.ViewHolder
+            ): Boolean {
+                val adapter = recyclerView.adapter as? PecAdapter ?: return false
+                adapter.moveItem(viewHolder.bindingAdapterPosition, target.bindingAdapterPosition)
+                return true
+            }
+
+            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) = Unit
+
+            override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
+                super.clearView(recyclerView, viewHolder)
+                val adapter = recyclerView.adapter as? PecAdapter ?: return
+                saveCardOrder(currentCategory, adapter.currentItems())
+            }
+        }).attachToRecyclerView(binding.board)
+        currentCategory = categories.first()
+        setCategory(currentCategory)
+        rebuildCategoryTabs(currentCategory)
         binding.speak.setOnClickListener { speakSentence() }
         binding.undo.setOnClickListener { if (words.isNotEmpty()) { words.removeLast(); updateSentence() } }
         binding.clear.setOnClickListener { words.clear(); updateSentence() }
+        binding.quickIWant.setOnClickListener { addWord("I want") }
+        binding.quickPlease.setOnClickListener { addWord("please") }
         binding.settings.setOnClickListener { showSettingsDialog() }
     }
 
@@ -109,13 +146,64 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun setCategory(category: String) {
         currentCategory = category
-        val visibleCards = (defaultCards.filterNot { defaultCardKey(it) in hiddenDefaultCards } + customCards)
-            .filter { it.category == category }
+        binding.quickPhraseBar.visibility = if (category == coreCategoryName) View.GONE else View.VISIBLE
+        val visibleCards = orderCards(category, allVisibleCards().filter { it.category == category })
         binding.board.adapter = PecAdapter(visibleCards) { card ->
-            words += card.label
-            updateSentence()
-            tts.speak(card.label, TextToSpeech.QUEUE_FLUSH, null, "card")
+            addWord(card.label)
         }
+    }
+
+    private fun addWord(word: String) {
+        words += word
+        updateSentence()
+        tts.speak(word, TextToSpeech.QUEUE_FLUSH, null, "card")
+    }
+
+    private fun allVisibleCards(): List<PecCard> {
+        val visibleDefaults = defaultCards
+            .filterNot { defaultCardKey(it) in hiddenDefaultCards }
+            .map { defaultCardOverrides[defaultCardKey(it)] ?: it }
+        return visibleDefaults + customCards
+    }
+
+    private fun cardOrderKey(card: PecCard): String = when {
+        card.defaultKey != null -> "default:${card.defaultKey}"
+        card.customId != null -> "custom:${card.customId}"
+        else -> "custom:${card.category}\u001F${card.label}"
+    }
+
+    private fun orderCards(category: String, cards: List<PecCard>): MutableList<PecCard> {
+        val remaining = cards.toMutableList()
+        val ordered = mutableListOf<PecCard>()
+        cardOrders[category].orEmpty().forEach { savedKey ->
+            val index = remaining.indexOfFirst { cardOrderKey(it) == savedKey }
+            if (index >= 0) ordered += remaining.removeAt(index)
+        }
+        ordered += remaining
+        return ordered
+    }
+
+    private fun saveCardOrder(category: String, cards: List<PecCard>) {
+        cardOrders[category] = cards.map(::cardOrderKey).toMutableList()
+        saveCardOrders()
+    }
+
+    private fun moveCardOrder(card: PecCard, destination: String) {
+        val key = cardOrderKey(card)
+        cardOrders.values.forEach { it.remove(key) }
+        val destinationCards = orderCards(
+            destination,
+            allVisibleCards().filter { it.category == destination }
+        ).map(::cardOrderKey).filterNot { it == key }.toMutableList()
+        destinationCards += key
+        cardOrders[destination] = destinationCards
+        saveCardOrders()
+    }
+
+    private fun removeCardOrder(card: PecCard) {
+        val key = cardOrderKey(card)
+        cardOrders.values.forEach { it.remove(key) }
+        saveCardOrders()
     }
 
     private fun showAddCardDialog() {
@@ -124,14 +212,22 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val categorySpinner = view.findViewById<Spinner>(R.id.cardCategory)
         val imagePreview = view.findViewById<ImageView>(R.id.imagePreview)
         val chooseImage = view.findViewById<Button>(R.id.chooseImage)
+        val removeImage = view.findViewById<Button>(R.id.removeImage)
         categorySpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, categories)
         categorySpinner.setSelection(categories.indexOf(currentCategory).coerceAtLeast(0))
         pendingImageUri = null
         pendingImageView = imagePreview
+        pendingRemoveImageButton = removeImage
         chooseImage.setOnClickListener { imagePicker.launch(arrayOf("image/*")) }
+        removeImage.setOnClickListener {
+            pendingImageUri = null
+            imagePreview.setImageDrawable(null)
+            imagePreview.visibility = View.GONE
+            removeImage.visibility = View.GONE
+        }
 
         val dialog = AlertDialog.Builder(this)
-            .setTitle("Add communication card")
+            .setTitle("Add Card")
             .setView(view)
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Add", null)
@@ -147,7 +243,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     label = label,
                     symbol = "⭐",
                     category = categorySpinner.selectedItem.toString(),
-                    imageUri = pendingImageUri?.toString()
+                    imageUri = pendingImageUri?.toString(),
+                    customId = UUID.randomUUID().toString()
                 )
                 saveCustomCards()
                 setCategory(currentCategory)
@@ -157,6 +254,95 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         dialog.setOnDismissListener {
             pendingImageUri = null
             pendingImageView = null
+            pendingRemoveImageButton = null
+        }
+        dialog.show()
+    }
+
+    private fun showEditCardSelector() {
+        val cards = allVisibleCards()
+        if (cards.isEmpty()) {
+            AlertDialog.Builder(this)
+                .setTitle("Edit Card")
+                .setMessage("There are no cards available to edit.")
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+
+        val cardNames = cards.map { "${it.symbol} ${it.label}  •  ${it.category}" }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Select a card to edit")
+            .setItems(cardNames) { _, which -> showEditCardDialog(cards[which]) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showEditCardDialog(card: PecCard) {
+        val view = layoutInflater.inflate(R.layout.dialog_add_card, null)
+        val labelInput = view.findViewById<EditText>(R.id.cardLabel)
+        val categorySpinner = view.findViewById<Spinner>(R.id.cardCategory)
+        val imagePreview = view.findViewById<ImageView>(R.id.imagePreview)
+        val chooseImage = view.findViewById<Button>(R.id.chooseImage)
+        val removeImage = view.findViewById<Button>(R.id.removeImage)
+
+        labelInput.setText(card.label)
+        categorySpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, categories)
+        categorySpinner.setSelection(categories.indexOf(card.category).coerceAtLeast(0))
+        pendingImageUri = card.imageUri?.let { Uri.parse(it) }
+        pendingImageView = imagePreview
+        pendingRemoveImageButton = removeImage
+        if (card.imageUri != null) {
+            imagePreview.setImageURI(pendingImageUri)
+            imagePreview.visibility = View.VISIBLE
+            removeImage.visibility = View.VISIBLE
+            chooseImage.text = "Choose different image"
+        }
+        chooseImage.setOnClickListener { imagePicker.launch(arrayOf("image/*")) }
+        removeImage.setOnClickListener {
+            pendingImageUri = null
+            imagePreview.setImageDrawable(null)
+            imagePreview.visibility = View.GONE
+            removeImage.visibility = View.GONE
+            chooseImage.text = "Choose image from phone"
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Edit Card")
+            .setView(view)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val label = labelInput.text.toString().trim()
+                if (label.isEmpty()) {
+                    labelInput.error = "Enter a label"
+                    return@setOnClickListener
+                }
+                val updated = card.copy(
+                    label = label,
+                    category = categorySpinner.selectedItem.toString(),
+                    imageUri = pendingImageUri?.toString()
+                )
+                if (card.defaultKey != null) {
+                    defaultCardOverrides[card.defaultKey] = updated
+                    saveDefaultCardOverrides()
+                } else {
+                    val index = customCards.indexOfFirst { it.customId == card.customId }
+                    if (index >= 0) customCards[index] = updated
+                    saveCustomCards()
+                }
+                if (card.category != updated.category) moveCardOrder(updated, updated.category)
+                setCategory(currentCategory)
+                dialog.dismiss()
+                Toast.makeText(this, "$label updated", Toast.LENGTH_SHORT).show()
+            }
+        }
+        dialog.setOnDismissListener {
+            pendingImageUri = null
+            pendingImageView = null
+            pendingRemoveImageButton = null
         }
         dialog.show()
     }
@@ -167,7 +353,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val status = view.findViewById<TextView>(R.id.updateStatus)
         val progress = view.findViewById<ProgressBar>(R.id.updateProgress)
         val addCard = view.findViewById<Button>(R.id.addCardFromSettings)
-        val createCategory = view.findViewById<Button>(R.id.createCategoryFromSettings)
+        val editCard = view.findViewById<Button>(R.id.editCardFromSettings)
+        val editCategory = view.findViewById<Button>(R.id.editCategoryFromSettings)
         val removeCard = view.findViewById<Button>(R.id.removeCardFromSettings)
         val restoreDefaults = view.findViewById<Button>(R.id.restoreDefaultCards)
         val check = view.findViewById<Button>(R.id.checkUpdates)
@@ -183,9 +370,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             dialog.dismiss()
             showAddCardDialog()
         }
-        createCategory.setOnClickListener {
+        editCard.setOnClickListener {
             dialog.dismiss()
-            showCreateCategoryDialog()
+            showEditCardSelector()
+        }
+        editCategory.setOnClickListener {
+            dialog.dismiss()
+            showEditCategoryDialog()
         }
         removeCard.setOnClickListener {
             dialog.dismiss()
@@ -198,7 +389,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Restore") { _, _ ->
                     hiddenDefaultCards.clear()
+                    defaultCards.map { defaultCardOverrides[defaultCardKey(it)] ?: it }
+                        .map { it.category }
+                        .filterNot { it in categories }
+                        .forEach { categories += it }
                     saveHiddenDefaultCards()
+                    saveCategories()
+                    if (currentCategory !in categories) currentCategory = categories.first()
+                    rebuildCategoryTabs(currentCategory)
                     setCategory(currentCategory)
                     restoreDefaults.visibility = View.GONE
                     Toast.makeText(this, "Default cards restored", Toast.LENGTH_SHORT).show()
@@ -230,6 +428,21 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         dialog.show()
     }
 
+    private fun showEditCategoryDialog() {
+        val actions = arrayOf("Create category", "Rename category", "Remove category")
+        AlertDialog.Builder(this)
+            .setTitle("Edit Category")
+            .setItems(actions) { _, which ->
+                when (which) {
+                    0 -> showCreateCategoryDialog()
+                    1 -> showRenameCategorySelector()
+                    2 -> showRemoveCategorySelector()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     private fun showCreateCategoryDialog() {
         val view = layoutInflater.inflate(R.layout.dialog_add_category, null)
         val nameInput = view.findViewById<EditText>(R.id.categoryName)
@@ -248,7 +461,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         nameInput.error = "That category already exists"
                     else -> {
                         categories += name
-                        saveCustomCategories()
+                        saveCategories()
                         setCategory(name)
                         rebuildCategoryTabs(name)
                         binding.categoryScroll.post { binding.categoryScroll.fullScroll(View.FOCUS_RIGHT) }
@@ -261,8 +474,123 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         dialog.show()
     }
 
+    private fun showRenameCategorySelector() {
+        AlertDialog.Builder(this)
+            .setTitle("Select a category to rename")
+            .setItems(categories.toTypedArray()) { _, which -> showRenameCategoryDialog(categories[which]) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showRenameCategoryDialog(category: String) {
+        val view = layoutInflater.inflate(R.layout.dialog_add_category, null)
+        val nameInput = view.findViewById<EditText>(R.id.categoryName)
+        nameInput.setText(category)
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Rename category")
+            .setView(view)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val name = nameInput.text.toString().trim()
+                when {
+                    name.isEmpty() -> nameInput.error = "Enter a category name"
+                    categories.any { it != category && it.equals(name, ignoreCase = true) } ->
+                        nameInput.error = "That category already exists"
+                    else -> {
+                        val categoryIndex = categories.indexOf(category)
+                        categories[categoryIndex] = name
+                        for (index in customCards.indices) {
+                            if (customCards[index].category == category) {
+                                customCards[index] = customCards[index].copy(category = name)
+                            }
+                        }
+                        defaultCards.forEach { defaultCard ->
+                            val key = defaultCardKey(defaultCard)
+                            val effectiveCard = defaultCardOverrides[key] ?: defaultCard
+                            if (effectiveCard.category == category) {
+                                defaultCardOverrides[key] = effectiveCard.copy(category = name)
+                            }
+                        }
+                        if (currentCategory == category) currentCategory = name
+                        if (coreCategoryName == category) coreCategoryName = name
+                        cardOrders.remove(category)?.let { cardOrders[name] = it }
+                        saveCategories()
+                        saveCoreCategoryName()
+                        saveCustomCards()
+                        saveDefaultCardOverrides()
+                        saveCardOrders()
+                        rebuildCategoryTabs(currentCategory)
+                        setCategory(currentCategory)
+                        dialog.dismiss()
+                        Toast.makeText(this, "$category renamed to $name", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun showRemoveCategorySelector() {
+        if (categories.size == 1) {
+            Toast.makeText(this, "At least one category is required", Toast.LENGTH_SHORT).show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Select a category to remove")
+            .setItems(categories.toTypedArray()) { _, which -> confirmCategoryRemoval(categories[which]) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun confirmCategoryRemoval(category: String) {
+        val destination = categories.first { it != category }
+        AlertDialog.Builder(this)
+            .setTitle("Remove $category?")
+            .setMessage("The tab will be removed. Its cards will be moved to $destination so no cards or images are lost.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Remove") { _, _ ->
+                val movedKeys = orderCards(
+                    category,
+                    allVisibleCards().filter { it.category == category }
+                ).map(::cardOrderKey)
+                val destinationKeys = orderCards(
+                    destination,
+                    allVisibleCards().filter { it.category == destination }
+                ).map(::cardOrderKey)
+                for (index in customCards.indices) {
+                    if (customCards[index].category == category) {
+                        customCards[index] = customCards[index].copy(category = destination)
+                    }
+                }
+                defaultCards.forEach { defaultCard ->
+                    val key = defaultCardKey(defaultCard)
+                    val effectiveCard = defaultCardOverrides[key] ?: defaultCard
+                    if (effectiveCard.category == category) {
+                        defaultCardOverrides[key] = effectiveCard.copy(category = destination)
+                    }
+                }
+                categories.remove(category)
+                if (currentCategory == category) currentCategory = categories.first()
+                if (coreCategoryName == category) coreCategoryName = destination
+                cardOrders.remove(category)
+                cardOrders[destination] = (destinationKeys + movedKeys).distinct().toMutableList()
+                saveCategories()
+                saveCoreCategoryName()
+                saveCustomCards()
+                saveDefaultCardOverrides()
+                saveCardOrders()
+                rebuildCategoryTabs(currentCategory)
+                setCategory(currentCategory)
+                Toast.makeText(this, "$category removed", Toast.LENGTH_SHORT).show()
+            }
+            .show()
+    }
+
     private fun showRemoveCardDialog() {
-        val removableCards = defaultCards.filterNot { defaultCardKey(it) in hiddenDefaultCards } + customCards
+        val removableCards = allVisibleCards()
         if (removableCards.isEmpty()) {
             AlertDialog.Builder(this)
                 .setTitle("Remove card")
@@ -286,43 +614,84 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             .setMessage("This card will no longer appear on the board.")
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Remove") { _, _ ->
-                if (card in defaultCards) {
+                if (card.defaultKey != null) {
                     hiddenDefaultCards += defaultCardKey(card)
                     saveHiddenDefaultCards()
                 } else {
-                    customCards.remove(card)
+                    customCards.removeAll { it.customId == card.customId }
                     saveCustomCards()
                 }
+                removeCardOrder(card)
                 setCategory(currentCategory)
                 Toast.makeText(this, "${card.label} removed", Toast.LENGTH_SHORT).show()
             }
             .show()
     }
 
-    private fun defaultCardKey(card: PecCard) = "${card.category}\u001F${card.label}"
+    private fun defaultCardKey(card: PecCard) = card.defaultKey ?: "${card.category}\u001F${card.label}"
 
-    private fun saveCustomCategories() {
+    private fun saveCategories() {
         val json = JSONArray()
-        categories.drop(defaultCategories.size).forEach { json.put(it) }
+        categories.forEach { json.put(it) }
         getSharedPreferences("pec_board", MODE_PRIVATE).edit()
-            .putString("custom_categories", json.toString())
+            .putString("categories_v2", json.toString())
+            .remove("custom_categories")
             .apply()
     }
 
-    private fun loadCustomCategories() {
-        val stored = getSharedPreferences("pec_board", MODE_PRIVATE)
-            .getString("custom_categories", null) ?: return
+    private fun loadCategories() {
+        val preferences = getSharedPreferences("pec_board", MODE_PRIVATE)
+        val stored = preferences.getString("categories_v2", null)
+        if (stored != null) {
+            try {
+                val loaded = mutableListOf<String>()
+                val json = JSONArray(stored)
+                for (index in 0 until json.length()) {
+                    val name = json.getString(index).trim()
+                    if (name.isNotEmpty() && loaded.none { it.equals(name, ignoreCase = true) }) {
+                        loaded += name
+                    }
+                }
+                if (loaded.isNotEmpty()) {
+                    categories.clear()
+                    categories += loaded
+                }
+            } catch (_: Exception) {
+                categories.clear()
+                categories += defaultCategories
+            }
+            return
+        }
+
+        val legacy = preferences.getString("custom_categories", null) ?: return
         try {
-            val json = JSONArray(stored)
+            val json = JSONArray(legacy)
             for (index in 0 until json.length()) {
                 val name = json.getString(index).trim()
                 if (name.isNotEmpty() && categories.none { it.equals(name, ignoreCase = true) }) {
                     categories += name
                 }
             }
+            saveCategories()
         } catch (_: Exception) {
             categories.clear()
             categories += defaultCategories
+        }
+    }
+
+    private fun saveCoreCategoryName() {
+        getSharedPreferences("pec_board", MODE_PRIVATE).edit()
+            .putString("core_category_name", coreCategoryName)
+            .apply()
+    }
+
+    private fun loadCoreCategoryName() {
+        val stored = getSharedPreferences("pec_board", MODE_PRIVATE)
+            .getString("core_category_name", "Core") ?: "Core"
+        coreCategoryName = when {
+            stored in categories -> stored
+            "Core" in categories -> "Core"
+            else -> categories.first()
         }
     }
 
@@ -330,6 +699,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val json = JSONArray()
         customCards.forEach { card ->
             json.put(JSONObject().apply {
+                put("id", card.customId)
                 put("label", card.label)
                 put("category", card.category)
                 put("imageUri", card.imageUri ?: JSONObject.NULL)
@@ -345,17 +715,92 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             .getString("custom_cards", null) ?: return
         try {
             val json = JSONArray(stored)
+            var migrated = false
             for (index in 0 until json.length()) {
                 val item = json.getJSONObject(index)
+                val category = item.getString("category")
+                val id = item.optString("id").takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString()
+                if (!item.has("id")) migrated = true
+                if (category !in categories) {
+                    categories += category
+                    migrated = true
+                }
                 customCards += PecCard(
                     label = item.getString("label"),
                     symbol = "⭐",
-                    category = item.getString("category"),
+                    category = category,
+                    imageUri = if (item.isNull("imageUri")) null else item.getString("imageUri"),
+                    customId = id
+                )
+            }
+            if (migrated) {
+                saveCustomCards()
+                saveCategories()
+            }
+        } catch (_: Exception) {
+            customCards.clear()
+        }
+    }
+
+    private fun saveDefaultCardOverrides() {
+        val json = JSONArray()
+        defaultCardOverrides.forEach { (key, card) ->
+            json.put(JSONObject().apply {
+                put("key", key)
+                put("label", card.label)
+                put("category", card.category)
+                put("imageUri", card.imageUri ?: JSONObject.NULL)
+            })
+        }
+        getSharedPreferences("pec_board", MODE_PRIVATE).edit()
+            .putString("default_card_overrides", json.toString())
+            .apply()
+    }
+
+    private fun loadDefaultCardOverrides() {
+        val stored = getSharedPreferences("pec_board", MODE_PRIVATE)
+            .getString("default_card_overrides", null) ?: return
+        try {
+            val json = JSONArray(stored)
+            for (index in 0 until json.length()) {
+                val item = json.getJSONObject(index)
+                val key = item.getString("key")
+                val baseCard = defaultCards.firstOrNull { defaultCardKey(it) == key } ?: continue
+                val category = item.getString("category")
+                defaultCardOverrides[key] = baseCard.copy(
+                    label = item.getString("label"),
+                    category = category,
                     imageUri = if (item.isNull("imageUri")) null else item.getString("imageUri")
                 )
             }
         } catch (_: Exception) {
-            customCards.clear()
+            defaultCardOverrides.clear()
+        }
+    }
+
+    private fun saveCardOrders() {
+        val json = JSONObject()
+        cardOrders.forEach { (category, keys) ->
+            json.put(category, JSONArray(keys))
+        }
+        getSharedPreferences("pec_board", MODE_PRIVATE).edit()
+            .putString("card_orders", json.toString())
+            .apply()
+    }
+
+    private fun loadCardOrders() {
+        val stored = getSharedPreferences("pec_board", MODE_PRIVATE)
+            .getString("card_orders", null) ?: return
+        try {
+            val json = JSONObject(stored)
+            val categories = json.keys()
+            while (categories.hasNext()) {
+                val category = categories.next()
+                val keys = json.getJSONArray(category)
+                cardOrders[category] = MutableList(keys.length()) { index -> keys.getString(index) }
+            }
+        } catch (_: Exception) {
+            cardOrders.clear()
         }
     }
 
@@ -394,7 +839,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 }
 
-class PecAdapter(private val items: List<PecCard>, private val onClick: (PecCard) -> Unit) :
+class PecAdapter(private val items: MutableList<PecCard>, private val onClick: (PecCard) -> Unit) :
     RecyclerView.Adapter<PecAdapter.Holder>() {
     class Holder(parent: ViewGroup) : RecyclerView.ViewHolder(
         LayoutInflater.from(parent.context).inflate(R.layout.item_pec, parent, false)
@@ -405,6 +850,16 @@ class PecAdapter(private val items: List<PecCard>, private val onClick: (PecCard
     }
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) = Holder(parent)
     override fun getItemCount() = items.size
+
+    fun moveItem(fromPosition: Int, toPosition: Int) {
+        if (fromPosition !in items.indices || toPosition !in items.indices) return
+        val movedCard = items.removeAt(fromPosition)
+        items.add(toPosition, movedCard)
+        notifyItemMoved(fromPosition, toPosition)
+    }
+
+    fun currentItems(): List<PecCard> = items.toList()
+
     override fun onBindViewHolder(holder: Holder, position: Int) {
         val item = items[position]
         holder.symbol.text = item.symbol
@@ -422,3 +877,4 @@ class PecAdapter(private val items: List<PecCard>, private val onClick: (PecCard
         holder.itemView.setOnClickListener { onClick(item) }
     }
 }
+
