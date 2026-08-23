@@ -35,6 +35,26 @@
         android:contentDescription="Restore removed default communication cards"
         android:visibility="gone" />
 
+    <TextView android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:layout_marginTop="18dp"
+        android:text="Backup &amp; Restore"
+        android:textSize="18sp" android:textStyle="bold" android:textColor="@color/navy" />
+
+    <TextView android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:layout_marginTop="4dp"
+        android:text="Save the full board to Google Drive or another location, then restore it on this or a new phone. Backups can contain personal images, so keep the file private."
+        android:textSize="15sp" />
+
+    <Button android:id="@+id/backUpBoard" android:layout_width="match_parent"
+        android:layout_height="56dp" android:layout_marginTop="10dp"
+        android:text="Back Up Board"
+        android:contentDescription="Save a complete board backup" />
+
+    <Button android:id="@+id/restoreBoard" android:layout_width="match_parent"
+        android:layout_height="56dp" android:layout_marginTop="10dp"
+        android:text="Restore Board"
+        android:contentDescription="Restore a saved board backup" />
+
     <ProgressBar android:id="@+id/updateProgress" style="?android:attr/progressBarStyle"
         android:layout_width="48dp" android:layout_height="48dp"
         android:layout_gravity="center_horizontal" android:layout_marginTop="10dp"
