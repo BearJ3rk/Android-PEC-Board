@@ -22,4 +22,10 @@
     <Button android:id="@+id/chooseImage" android:layout_width="match_parent"
         android:layout_height="56dp" android:layout_marginTop="12dp"
         android:text="Choose image from phone" />
+
+    <Button android:id="@+id/removeImage" android:layout_width="match_parent"
+        android:layout_height="56dp" android:layout_marginTop="10dp"
+        android:text="Remove image" android:visibility="gone"
+        android:contentDescription="Remove the card image" />
 </LinearLayout>
+

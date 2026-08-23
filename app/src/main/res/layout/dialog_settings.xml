@@ -21,13 +21,18 @@
 
     <Button android:id="@+id/addCardFromSettings" android:layout_width="match_parent"
         android:layout_height="56dp" android:layout_marginTop="14dp"
-        android:text="+ Add communication card"
-        android:contentDescription="Add a communication card" />
+        android:text="Add Card"
+        android:contentDescription="Add a card" />
 
-    <Button android:id="@+id/createCategoryFromSettings" android:layout_width="match_parent"
+    <Button android:id="@+id/editCardFromSettings" android:layout_width="match_parent"
         android:layout_height="56dp" android:layout_marginTop="10dp"
-        android:text="Create category"
-        android:contentDescription="Create a new card category" />
+        android:text="Edit Card"
+        android:contentDescription="Edit a card" />
+
+    <Button android:id="@+id/editCategoryFromSettings" android:layout_width="match_parent"
+        android:layout_height="56dp" android:layout_marginTop="10dp"
+        android:text="Edit Category"
+        android:contentDescription="Create, rename, or remove a category" />
 
     <Button android:id="@+id/removeCardFromSettings" android:layout_width="match_parent"
         android:layout_height="56dp" android:layout_marginTop="10dp"
@@ -54,3 +59,4 @@
         android:text="Download update" android:visibility="gone" />
 </LinearLayout>
 </ScrollView>
+
