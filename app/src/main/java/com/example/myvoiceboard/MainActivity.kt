@@ -25,8 +25,11 @@ import com.example.myvoiceboard.databinding.ActivityMainBinding
 import com.google.android.material.chip.Chip
 import org.json.JSONArray
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import kotlin.concurrent.thread
 
 data class PecCard(
     val label: String,
@@ -41,6 +44,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var binding: ActivityMainBinding
     private lateinit var tts: TextToSpeech
     private lateinit var updateManager: AppUpdateManager
+    private lateinit var backupManager: BoardBackupManager
     private val words = mutableListOf<String>()
     private val defaultCategories = listOf("Core", "Food", "Feelings", "Activities")
     private val categories = defaultCategories.toMutableList()
@@ -68,6 +72,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             pendingRemoveImageButton?.visibility = View.VISIBLE
         }
     }
+    private val backupDocumentCreator = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri ->
+        if (uri != null) exportBoardBackup(uri)
+    }
+    private val backupDocumentPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) importBoardBackup(uri)
+    }
     private val defaultCards = listOf(
         PecCard("I want", "🙋", "Core"), PecCard("I need help", "🤝", "Core"),
         PecCard("Yes", "✅", "Core"), PecCard("No", "❌", "Core"),
@@ -87,6 +99,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         setContentView(binding.root)
         tts = TextToSpeech(this, this)
         updateManager = AppUpdateManager(this)
+        backupManager = BoardBackupManager(this)
         updateManager.start()
         loadCategories()
         loadCoreCategoryName()
@@ -370,6 +383,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val editCard = view.findViewById<Button>(R.id.editCardFromSettings)
         val editCategory = view.findViewById<Button>(R.id.editCategoryFromSettings)
         val restoreDefaults = view.findViewById<Button>(R.id.restoreDefaultCards)
+        val backUpBoard = view.findViewById<Button>(R.id.backUpBoard)
+        val restoreBoard = view.findViewById<Button>(R.id.restoreBoard)
         val check = view.findViewById<Button>(R.id.checkUpdates)
         val download = view.findViewById<Button>(R.id.downloadUpdate)
         version.text = "Installed version: ${updateManager.currentVersion()}"
@@ -408,6 +423,24 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
                 .show()
         }
+        backUpBoard.setOnClickListener {
+            dialog.dismiss()
+            val date = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+            backupDocumentCreator.launch("PEC-Board-backup-$date.zip")
+        }
+        restoreBoard.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("Restore a board backup?")
+                .setMessage("Your current categories, cards, images, and card order will be replaced by the selected backup.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Choose backup") { _, _ ->
+                    dialog.dismiss()
+                    backupDocumentPicker.launch(
+                        arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")
+                    )
+                }
+                .show()
+        }
         check.setOnClickListener {
             check.isEnabled = false
             download.visibility = View.GONE
@@ -431,6 +464,81 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
         dialog.show()
+    }
+
+    private fun exportBoardBackup(destination: Uri) {
+        val snapshot = BoardBackupSnapshot(
+            appVersion = updateManager.currentVersion(),
+            categories = categories.toList(),
+            coreCategoryName = coreCategoryName,
+            customCards = customCards.toList(),
+            defaultCardOverrides = defaultCardOverrides.toMap(),
+            hiddenDefaultCards = hiddenDefaultCards.toSet(),
+            cardOrders = cardOrders.mapValues { (_, keys) -> keys.toList() }
+        )
+        Toast.makeText(this, "Creating board backup…", Toast.LENGTH_SHORT).show()
+        thread(name = "pec-board-backup") {
+            val result = backupManager.exportBackup(destination, snapshot)
+            runOnUiThread {
+                result.onSuccess { summary ->
+                    val imageText = if (summary.images == 1) "1 image" else "${summary.images} images"
+                    Toast.makeText(this, "Backup saved with $imageText", Toast.LENGTH_LONG).show()
+                }.onFailure { error ->
+                    Toast.makeText(this, error.message ?: "The backup could not be saved.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun importBoardBackup(source: Uri) {
+        Toast.makeText(this, "Restoring board backup…", Toast.LENGTH_SHORT).show()
+        thread(name = "pec-board-restore") {
+            val result = backupManager.importBackup(source)
+            runOnUiThread {
+                result.onSuccess(::applyRestoredBoard).onFailure { error ->
+                    Toast.makeText(this, error.message ?: "The backup could not be restored.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun applyRestoredBoard(restored: BoardBackupData) {
+        categories.clear()
+        categories += restored.categories
+        coreCategoryName = restored.coreCategoryName
+        customCards.clear()
+        customCards += restored.customCards
+        defaultCardOverrides.clear()
+        restored.defaultCardOverrides.forEach { (key, importedCard) ->
+            val baseCard = defaultCards.firstOrNull { defaultCardKey(it) == key }
+            if (baseCard != null) {
+                defaultCardOverrides[key] = baseCard.copy(
+                    label = importedCard.label,
+                    category = importedCard.category,
+                    imageUri = importedCard.imageUri
+                )
+            }
+        }
+        hiddenDefaultCards.clear()
+        hiddenDefaultCards += restored.hiddenDefaultCards
+        cardOrders.clear()
+        restored.cardOrders.forEach { (category, keys) -> cardOrders[category] = keys.toMutableList() }
+        currentCategory = categories.first()
+        words.clear()
+
+        saveCategories()
+        saveCoreCategoryName()
+        saveCustomCards()
+        saveDefaultCardOverrides()
+        saveHiddenDefaultCards()
+        saveCardOrders()
+        updateSentence()
+        rebuildCategoryTabs(currentCategory)
+        setCategory(currentCategory)
+        backupManager.cleanUnusedRestoredImages(
+            (customCards + defaultCardOverrides.values).map { it.imageUri }
+        )
+        Toast.makeText(this, "Board backup restored", Toast.LENGTH_LONG).show()
     }
 
     private fun showEditCategoryDialog() {
