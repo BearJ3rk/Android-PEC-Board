@@ -6,7 +6,7 @@
     android:padding="16dp">
 
     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-        android:text="My Voice Board" android:textColor="@color/navy"
+        android:text="PEC Board V0.1" android:textColor="@color/navy"
         android:textSize="26sp" android:textStyle="bold" android:layout_marginBottom="12dp" />
 
     <HorizontalScrollView android:layout_width="match_parent" android:layout_height="wrap_content"
@@ -39,4 +39,3 @@
         android:layout_width="match_parent" android:layout_height="0dp"
         android:layout_weight="1" android:paddingTop="16dp" android:clipToPadding="false" />
 </LinearLayout>
-
