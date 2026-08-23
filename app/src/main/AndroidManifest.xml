@@ -5,7 +5,7 @@
 
     <application
         android:allowBackup="true"
-        android:label="PEC Board V0.2"
+        android:label="PEC Board V0.6"
         android:supportsRtl="true"
         android:usesCleartextTraffic="false"
         android:theme="@style/Theme.MyVoiceBoard">
