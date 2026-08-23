@@ -1,4 +1,4 @@
-# PEC Board V0.1
+# PEC Board V0.2
 
 An offline-first Android picture exchange communication board. It offers large visual cards, categories, sentence construction, undo/clear controls, and Android text-to-speech.
 
@@ -6,7 +6,9 @@ An offline-first Android picture exchange communication board. It offers large v
 
 Open this folder in Android Studio (JDK 17), allow Gradle sync, and run the `app` configuration on an Android 6.0+ device or emulator.
 
-Every push to `main` is compiled by GitHub Actions. Download the installable debug APK from the latest successful **Android build** workflow run under **Actions → Artifacts**.
+Every approved push to `main` is compiled and signed by GitHub Actions. Download the installable release APK from the latest successful **Android build** workflow run under **Actions → Artifacts**, or from the repository's Releases page.
+
+The in-app Settings panel can check this repository for a newer release, download its APK, and open Android's installer. All releases after V0.1 must use the same permanent signing key for update compatibility.
 
 ## Accessibility and privacy
 
