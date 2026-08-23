@@ -14,6 +14,7 @@ import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.Spinner
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AlertDialog
@@ -37,9 +38,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var tts: TextToSpeech
     private lateinit var updateManager: AppUpdateManager
     private val words = mutableListOf<String>()
-    private val categories = listOf("Core", "Food", "Feelings", "Activities")
+    private val defaultCategories = listOf("Core", "Food", "Feelings", "Activities")
+    private val categories = defaultCategories.toMutableList()
     private var currentCategory = "Core"
     private val customCards = mutableListOf<PecCard>()
+    private val hiddenDefaultCards = mutableSetOf<String>()
     private var pendingImageUri: Uri? = null
     private var pendingImageView: ImageView? = null
     private val imagePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -76,31 +79,38 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         tts = TextToSpeech(this, this)
         updateManager = AppUpdateManager(this)
         updateManager.start()
+        loadCustomCategories()
         loadCustomCards()
+        loadHiddenDefaultCards()
 
         val span = if (resources.configuration.smallestScreenWidthDp >= 600) 5 else 3
         binding.board.layoutManager = GridLayoutManager(this, span)
         setCategory("Core")
-        categories.forEachIndexed { index, name ->
+        rebuildCategoryTabs("Core")
+        binding.speak.setOnClickListener { speakSentence() }
+        binding.undo.setOnClickListener { if (words.isNotEmpty()) { words.removeLast(); updateSentence() } }
+        binding.clear.setOnClickListener { words.clear(); updateSentence() }
+        binding.settings.setOnClickListener { showSettingsDialog() }
+    }
+
+    private fun rebuildCategoryTabs(selectedCategory: String) {
+        binding.categories.removeAllViews()
+        categories.forEach { name ->
             val chip = Chip(this).apply {
                 text = name
                 isCheckable = true
-                isChecked = index == 0
+                isChecked = name == selectedCategory
                 minHeight = 48
                 setOnClickListener { setCategory(name) }
             }
             binding.categories.addView(chip)
         }
-        binding.speak.setOnClickListener { speakSentence() }
-        binding.undo.setOnClickListener { if (words.isNotEmpty()) { words.removeLast(); updateSentence() } }
-        binding.clear.setOnClickListener { words.clear(); updateSentence() }
-        binding.addCard.setOnClickListener { showAddCardDialog() }
-        binding.settings.setOnClickListener { showSettingsDialog() }
     }
 
     private fun setCategory(category: String) {
         currentCategory = category
-        val visibleCards = (defaultCards + customCards).filter { it.category == category }
+        val visibleCards = (defaultCards.filterNot { defaultCardKey(it) in hiddenDefaultCards } + customCards)
+            .filter { it.category == category }
         binding.board.adapter = PecAdapter(visibleCards) { card ->
             words += card.label
             updateSentence()
@@ -156,14 +166,45 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val version = view.findViewById<TextView>(R.id.installedVersion)
         val status = view.findViewById<TextView>(R.id.updateStatus)
         val progress = view.findViewById<ProgressBar>(R.id.updateProgress)
+        val addCard = view.findViewById<Button>(R.id.addCardFromSettings)
+        val createCategory = view.findViewById<Button>(R.id.createCategoryFromSettings)
+        val removeCard = view.findViewById<Button>(R.id.removeCardFromSettings)
+        val restoreDefaults = view.findViewById<Button>(R.id.restoreDefaultCards)
         val check = view.findViewById<Button>(R.id.checkUpdates)
         val download = view.findViewById<Button>(R.id.downloadUpdate)
         version.text = "Installed version: ${updateManager.currentVersion()}"
+        restoreDefaults.visibility = if (hiddenDefaultCards.isEmpty()) View.GONE else View.VISIBLE
         val dialog = AlertDialog.Builder(this)
             .setTitle("Settings")
             .setView(view)
             .setNegativeButton("Close", null)
             .create()
+        addCard.setOnClickListener {
+            dialog.dismiss()
+            showAddCardDialog()
+        }
+        createCategory.setOnClickListener {
+            dialog.dismiss()
+            showCreateCategoryDialog()
+        }
+        removeCard.setOnClickListener {
+            dialog.dismiss()
+            showRemoveCardDialog()
+        }
+        restoreDefaults.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("Restore default cards?")
+                .setMessage("All built-in cards that were removed will return to the board.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Restore") { _, _ ->
+                    hiddenDefaultCards.clear()
+                    saveHiddenDefaultCards()
+                    setCategory(currentCategory)
+                    restoreDefaults.visibility = View.GONE
+                    Toast.makeText(this, "Default cards restored", Toast.LENGTH_SHORT).show()
+                }
+                .show()
+        }
         check.setOnClickListener {
             check.isEnabled = false
             download.visibility = View.GONE
@@ -187,6 +228,102 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
         }
         dialog.show()
+    }
+
+    private fun showCreateCategoryDialog() {
+        val view = layoutInflater.inflate(R.layout.dialog_add_category, null)
+        val nameInput = view.findViewById<EditText>(R.id.categoryName)
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Create category")
+            .setView(view)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Create", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val name = nameInput.text.toString().trim()
+                when {
+                    name.isEmpty() -> nameInput.error = "Enter a category name"
+                    categories.any { it.equals(name, ignoreCase = true) } ->
+                        nameInput.error = "That category already exists"
+                    else -> {
+                        categories += name
+                        saveCustomCategories()
+                        setCategory(name)
+                        rebuildCategoryTabs(name)
+                        binding.categoryScroll.post { binding.categoryScroll.fullScroll(View.FOCUS_RIGHT) }
+                        dialog.dismiss()
+                        Toast.makeText(this, "$name category created", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun showRemoveCardDialog() {
+        val removableCards = defaultCards.filterNot { defaultCardKey(it) in hiddenDefaultCards } + customCards
+        if (removableCards.isEmpty()) {
+            AlertDialog.Builder(this)
+                .setTitle("Remove card")
+                .setMessage("There are no cards available to remove.")
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+
+        val cardNames = removableCards.map { "${it.symbol} ${it.label}  •  ${it.category}" }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Select a card to remove")
+            .setItems(cardNames) { _, which -> confirmCardRemoval(removableCards[which]) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun confirmCardRemoval(card: PecCard) {
+        AlertDialog.Builder(this)
+            .setTitle("Remove ${card.label}?")
+            .setMessage("This card will no longer appear on the board.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Remove") { _, _ ->
+                if (card in defaultCards) {
+                    hiddenDefaultCards += defaultCardKey(card)
+                    saveHiddenDefaultCards()
+                } else {
+                    customCards.remove(card)
+                    saveCustomCards()
+                }
+                setCategory(currentCategory)
+                Toast.makeText(this, "${card.label} removed", Toast.LENGTH_SHORT).show()
+            }
+            .show()
+    }
+
+    private fun defaultCardKey(card: PecCard) = "${card.category}\u001F${card.label}"
+
+    private fun saveCustomCategories() {
+        val json = JSONArray()
+        categories.drop(defaultCategories.size).forEach { json.put(it) }
+        getSharedPreferences("pec_board", MODE_PRIVATE).edit()
+            .putString("custom_categories", json.toString())
+            .apply()
+    }
+
+    private fun loadCustomCategories() {
+        val stored = getSharedPreferences("pec_board", MODE_PRIVATE)
+            .getString("custom_categories", null) ?: return
+        try {
+            val json = JSONArray(stored)
+            for (index in 0 until json.length()) {
+                val name = json.getString(index).trim()
+                if (name.isNotEmpty() && categories.none { it.equals(name, ignoreCase = true) }) {
+                    categories += name
+                }
+            }
+        } catch (_: Exception) {
+            categories.clear()
+            categories += defaultCategories
+        }
     }
 
     private fun saveCustomCards() {
@@ -220,6 +357,19 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         } catch (_: Exception) {
             customCards.clear()
         }
+    }
+
+    private fun saveHiddenDefaultCards() {
+        getSharedPreferences("pec_board", MODE_PRIVATE).edit()
+            .putStringSet("hidden_default_cards", hiddenDefaultCards.toSet())
+            .apply()
+    }
+
+    private fun loadHiddenDefaultCards() {
+        val stored = getSharedPreferences("pec_board", MODE_PRIVATE)
+            .getStringSet("hidden_default_cards", emptySet()) ?: emptySet()
+        hiddenDefaultCards.clear()
+        hiddenDefaultCards += stored
     }
 
     private fun updateSentence() {
