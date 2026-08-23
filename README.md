@@ -1,8 +1,8 @@
-# PEC Board V0.4
+# PEC Board V0.5
 
 An offline-first Android picture exchange communication board. It offers large visual cards, categories, sentence construction, undo/clear controls, and Android text-to-speech.
 
-V0.4 adds complete card and category management, persistent drag-and-drop card ordering, and compact “I want” / “Please” quick-phrase buttons on non-Core tabs. Cards can be renamed, moved, and given a replacement image; categories can be created, renamed, or removed without losing their cards. User-created cards, categories, images, ordering, and visibility choices remain stored when updating the APK.
+V0.5 groups Add, Edit, and Remove card actions under one **Edit Card** Settings option, matching the existing category-management flow. It also places the compact “I want” / “Please” quick-phrase buttons directly below the sentence and text-to-speech controls on non-Core tabs. User-created cards, categories, images, ordering, and visibility choices remain stored when updating the APK.
 
 ## Run
 
@@ -20,4 +20,3 @@ The in-app Settings panel can check this repository for a newer release, downloa
 - No ads, analytics, or data collection
 
 Emoji are placeholders for an MVP. For clinical or classroom use, replace them with a consistent, licensed symbol library and personalize vocabulary with the user's support team.
-
