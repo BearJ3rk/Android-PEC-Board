@@ -3,3 +3,10 @@
 local.properties
 **/build/
 *.iml
+signing.properties
+*.jks
+*.keystore
+*.p12
+*.pfx
+outputs/
+work/
