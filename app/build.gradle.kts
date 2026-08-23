@@ -32,8 +32,8 @@ android {
         applicationId = "com.example.myvoiceboard"
         minSdk = 23
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4"
+        versionCode = 5
+        versionName = "0.5"
     }
 
     buildFeatures { viewBinding = true }
@@ -70,4 +70,3 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.recyclerview:recyclerview:1.3.2")
 }
-

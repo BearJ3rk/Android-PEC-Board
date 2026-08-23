@@ -9,7 +9,7 @@
         android:orientation="horizontal" android:gravity="center_vertical"
         android:layout_marginBottom="12dp">
         <TextView android:layout_width="0dp" android:layout_height="wrap_content"
-            android:layout_weight="1" android:text="PEC Board V0.4"
+            android:layout_weight="1" android:text="PEC Board V0.5"
             android:textColor="@color/navy" android:textSize="26sp" android:textStyle="bold" />
         <ImageButton android:id="@+id/settings" android:layout_width="52dp"
             android:layout_height="52dp" android:layout_marginStart="6dp"
@@ -27,11 +27,29 @@
             app:selectionRequired="true" />
     </HorizontalScrollView>
 
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center_vertical"
+        android:background="@drawable/sentence_background" android:padding="12dp">
+        <TextView android:id="@+id/sentence" android:layout_width="0dp"
+            android:layout_height="wrap_content" android:layout_weight="1"
+            android:minHeight="48dp" android:gravity="center_vertical"
+            android:text="Tap a card to build a sentence" android:textColor="#51606F"
+            android:textSize="20sp" android:contentDescription="Current sentence" />
+        <Button android:id="@+id/speak" android:layout_width="wrap_content"
+            android:layout_height="56dp" android:text="Speak" />
+        <ImageButton android:id="@+id/undo" android:layout_width="56dp"
+            android:layout_height="56dp" android:src="@android:drawable/ic_menu_revert"
+            android:backgroundTint="@android:color/transparent" android:contentDescription="Remove last word" />
+        <ImageButton android:id="@+id/clear" android:layout_width="56dp"
+            android:layout_height="56dp" android:src="@android:drawable/ic_menu_delete"
+            android:backgroundTint="@android:color/transparent" android:contentDescription="Clear sentence" />
+    </LinearLayout>
+
     <LinearLayout
         android:id="@+id/quickPhraseBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="10dp"
+        android:layout_marginTop="10dp"
         android:gravity="center"
         android:orientation="horizontal"
         android:visibility="gone">
@@ -56,26 +74,7 @@
             android:contentDescription="Add please to the sentence" />
     </LinearLayout>
 
-    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:orientation="horizontal" android:gravity="center_vertical"
-        android:background="@drawable/sentence_background" android:padding="12dp">
-        <TextView android:id="@+id/sentence" android:layout_width="0dp"
-            android:layout_height="wrap_content" android:layout_weight="1"
-            android:minHeight="48dp" android:gravity="center_vertical"
-            android:text="Tap a card to build a sentence" android:textColor="#51606F"
-            android:textSize="20sp" android:contentDescription="Current sentence" />
-        <Button android:id="@+id/speak" android:layout_width="wrap_content"
-            android:layout_height="56dp" android:text="Speak" />
-        <ImageButton android:id="@+id/undo" android:layout_width="56dp"
-            android:layout_height="56dp" android:src="@android:drawable/ic_menu_revert"
-            android:backgroundTint="@android:color/transparent" android:contentDescription="Remove last word" />
-        <ImageButton android:id="@+id/clear" android:layout_width="56dp"
-            android:layout_height="56dp" android:src="@android:drawable/ic_menu_delete"
-            android:backgroundTint="@android:color/transparent" android:contentDescription="Clear sentence" />
-    </LinearLayout>
-
     <androidx.recyclerview.widget.RecyclerView android:id="@+id/board"
         android:layout_width="match_parent" android:layout_height="0dp"
         android:layout_weight="1" android:paddingTop="16dp" android:clipToPadding="false" />
 </LinearLayout>
-
