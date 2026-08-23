@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
         android:allowBackup="true"
-        android:label="My Voice Board"
+        android:label="PEC Board V0.1"
         android:supportsRtl="true"
         android:theme="@style/Theme.MyVoiceBoard">
         <activity
