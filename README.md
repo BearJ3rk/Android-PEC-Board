@@ -1,6 +1,8 @@
-# PEC Board V0.2
+# PEC Board V0.3
 
 An offline-first Android picture exchange communication board. It offers large visual cards, categories, sentence construction, undo/clear controls, and Android text-to-speech.
+
+V0.3 adds Settings-based card creation and removal, phone image selection for custom cards, persistent custom category tabs, and restoration of removed built-in cards. User-created cards, categories, and card visibility choices remain stored when updating the APK.
 
 ## Run
 
