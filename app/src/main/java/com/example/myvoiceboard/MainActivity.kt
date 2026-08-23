@@ -347,15 +347,28 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         dialog.show()
     }
 
+    private fun showEditCardMenu() {
+        val actions = arrayOf("Add card", "Edit card", "Remove card")
+        AlertDialog.Builder(this)
+            .setTitle("Edit Card")
+            .setItems(actions) { _, which ->
+                when (which) {
+                    0 -> showAddCardDialog()
+                    1 -> showEditCardSelector()
+                    2 -> showRemoveCardDialog()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     private fun showSettingsDialog() {
         val view = layoutInflater.inflate(R.layout.dialog_settings, null)
         val version = view.findViewById<TextView>(R.id.installedVersion)
         val status = view.findViewById<TextView>(R.id.updateStatus)
         val progress = view.findViewById<ProgressBar>(R.id.updateProgress)
-        val addCard = view.findViewById<Button>(R.id.addCardFromSettings)
         val editCard = view.findViewById<Button>(R.id.editCardFromSettings)
         val editCategory = view.findViewById<Button>(R.id.editCategoryFromSettings)
-        val removeCard = view.findViewById<Button>(R.id.removeCardFromSettings)
         val restoreDefaults = view.findViewById<Button>(R.id.restoreDefaultCards)
         val check = view.findViewById<Button>(R.id.checkUpdates)
         val download = view.findViewById<Button>(R.id.downloadUpdate)
@@ -366,21 +379,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             .setView(view)
             .setNegativeButton("Close", null)
             .create()
-        addCard.setOnClickListener {
-            dialog.dismiss()
-            showAddCardDialog()
-        }
         editCard.setOnClickListener {
             dialog.dismiss()
-            showEditCardSelector()
+            showEditCardMenu()
         }
         editCategory.setOnClickListener {
             dialog.dismiss()
             showEditCategoryDialog()
-        }
-        removeCard.setOnClickListener {
-            dialog.dismiss()
-            showRemoveCardDialog()
         }
         restoreDefaults.setOnClickListener {
             AlertDialog.Builder(this)
@@ -877,4 +882,3 @@ class PecAdapter(private val items: MutableList<PecCard>, private val onClick: (
         holder.itemView.setOnClickListener { onClick(item) }
     }
 }
-
