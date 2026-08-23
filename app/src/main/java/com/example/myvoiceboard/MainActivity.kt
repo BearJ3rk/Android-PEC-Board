@@ -1,24 +1,62 @@
 package com.example.myvoiceboard
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
+import android.widget.ArrayAdapter
+import android.widget.Button
+import android.widget.EditText
+import android.widget.ImageView
+import android.widget.ProgressBar
+import android.widget.Spinner
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AlertDialog
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.example.myvoiceboard.databinding.ActivityMainBinding
 import com.google.android.material.chip.Chip
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.Locale
 
-data class PecCard(val label: String, val symbol: String, val category: String)
+data class PecCard(
+    val label: String,
+    val symbol: String,
+    val category: String,
+    val imageUri: String? = null
+)
 
 class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var binding: ActivityMainBinding
     private lateinit var tts: TextToSpeech
+    private lateinit var updateManager: AppUpdateManager
     private val words = mutableListOf<String>()
-    private val cards = listOf(
+    private val categories = listOf("Core", "Food", "Feelings", "Activities")
+    private var currentCategory = "Core"
+    private val customCards = mutableListOf<PecCard>()
+    private var pendingImageUri: Uri? = null
+    private var pendingImageView: ImageView? = null
+    private val imagePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            try {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (_: SecurityException) {
+                // Some document providers grant access without a persistable permission.
+            }
+            pendingImageUri = uri
+            pendingImageView?.apply {
+                setImageURI(uri)
+                visibility = View.VISIBLE
+            }
+        }
+    }
+    private val defaultCards = listOf(
         PecCard("I want", "🙋", "Core"), PecCard("I need help", "🤝", "Core"),
         PecCard("Yes", "✅", "Core"), PecCard("No", "❌", "Core"),
         PecCard("More", "➕", "Core"), PecCard("Finished", "🏁", "Core"),
@@ -36,11 +74,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         tts = TextToSpeech(this, this)
+        updateManager = AppUpdateManager(this)
+        updateManager.start()
+        loadCustomCards()
 
         val span = if (resources.configuration.smallestScreenWidthDp >= 600) 5 else 3
         binding.board.layoutManager = GridLayoutManager(this, span)
         setCategory("Core")
-        listOf("Core", "Food", "Feelings", "Activities").forEachIndexed { index, name ->
+        categories.forEachIndexed { index, name ->
             val chip = Chip(this).apply {
                 text = name
                 isCheckable = true
@@ -53,13 +94,131 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         binding.speak.setOnClickListener { speakSentence() }
         binding.undo.setOnClickListener { if (words.isNotEmpty()) { words.removeLast(); updateSentence() } }
         binding.clear.setOnClickListener { words.clear(); updateSentence() }
+        binding.addCard.setOnClickListener { showAddCardDialog() }
+        binding.settings.setOnClickListener { showSettingsDialog() }
     }
 
     private fun setCategory(category: String) {
-        binding.board.adapter = PecAdapter(cards.filter { it.category == category }) { card ->
+        currentCategory = category
+        val visibleCards = (defaultCards + customCards).filter { it.category == category }
+        binding.board.adapter = PecAdapter(visibleCards) { card ->
             words += card.label
             updateSentence()
             tts.speak(card.label, TextToSpeech.QUEUE_FLUSH, null, "card")
+        }
+    }
+
+    private fun showAddCardDialog() {
+        val view = layoutInflater.inflate(R.layout.dialog_add_card, null)
+        val labelInput = view.findViewById<EditText>(R.id.cardLabel)
+        val categorySpinner = view.findViewById<Spinner>(R.id.cardCategory)
+        val imagePreview = view.findViewById<ImageView>(R.id.imagePreview)
+        val chooseImage = view.findViewById<Button>(R.id.chooseImage)
+        categorySpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, categories)
+        categorySpinner.setSelection(categories.indexOf(currentCategory).coerceAtLeast(0))
+        pendingImageUri = null
+        pendingImageView = imagePreview
+        chooseImage.setOnClickListener { imagePicker.launch(arrayOf("image/*")) }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Add communication card")
+            .setView(view)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Add", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val label = labelInput.text.toString().trim()
+                if (label.isEmpty()) {
+                    labelInput.error = "Enter a label"
+                    return@setOnClickListener
+                }
+                customCards += PecCard(
+                    label = label,
+                    symbol = "⭐",
+                    category = categorySpinner.selectedItem.toString(),
+                    imageUri = pendingImageUri?.toString()
+                )
+                saveCustomCards()
+                setCategory(currentCategory)
+                dialog.dismiss()
+            }
+        }
+        dialog.setOnDismissListener {
+            pendingImageUri = null
+            pendingImageView = null
+        }
+        dialog.show()
+    }
+
+    private fun showSettingsDialog() {
+        val view = layoutInflater.inflate(R.layout.dialog_settings, null)
+        val version = view.findViewById<TextView>(R.id.installedVersion)
+        val status = view.findViewById<TextView>(R.id.updateStatus)
+        val progress = view.findViewById<ProgressBar>(R.id.updateProgress)
+        val check = view.findViewById<Button>(R.id.checkUpdates)
+        val download = view.findViewById<Button>(R.id.downloadUpdate)
+        version.text = "Installed version: ${updateManager.currentVersion()}"
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Settings")
+            .setView(view)
+            .setNegativeButton("Close", null)
+            .create()
+        check.setOnClickListener {
+            check.isEnabled = false
+            download.visibility = View.GONE
+            progress.visibility = View.VISIBLE
+            status.text = "Checking GitHub releases…"
+            updateManager.checkForUpdate { message, available ->
+                if (!dialog.isShowing) return@checkForUpdate
+                progress.visibility = View.GONE
+                check.isEnabled = true
+                status.text = message
+                if (available != null) {
+                    download.text = "Download ${available.tag}"
+                    download.visibility = View.VISIBLE
+                    download.setOnClickListener {
+                        download.isEnabled = false
+                        updateManager.download(available) { updateStatus ->
+                            status.text = updateStatus
+                        }
+                    }
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun saveCustomCards() {
+        val json = JSONArray()
+        customCards.forEach { card ->
+            json.put(JSONObject().apply {
+                put("label", card.label)
+                put("category", card.category)
+                put("imageUri", card.imageUri ?: JSONObject.NULL)
+            })
+        }
+        getSharedPreferences("pec_board", MODE_PRIVATE).edit()
+            .putString("custom_cards", json.toString())
+            .apply()
+    }
+
+    private fun loadCustomCards() {
+        val stored = getSharedPreferences("pec_board", MODE_PRIVATE)
+            .getString("custom_cards", null) ?: return
+        try {
+            val json = JSONArray(stored)
+            for (index in 0 until json.length()) {
+                val item = json.getJSONObject(index)
+                customCards += PecCard(
+                    label = item.getString("label"),
+                    symbol = "⭐",
+                    category = item.getString("category"),
+                    imageUri = if (item.isNull("imageUri")) null else item.getString("imageUri")
+                )
+            }
+        } catch (_: Exception) {
+            customCards.clear()
         }
     }
 
@@ -76,7 +235,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     override fun onDestroy() {
-        tts.stop(); tts.shutdown(); super.onDestroy()
+        updateManager.stop(); tts.stop(); tts.shutdown(); super.onDestroy()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::updateManager.isInitialized) updateManager.installPendingUpdate()
     }
 }
 
@@ -86,6 +250,7 @@ class PecAdapter(private val items: List<PecCard>, private val onClick: (PecCard
         LayoutInflater.from(parent.context).inflate(R.layout.item_pec, parent, false)
     ) {
         val symbol: TextView = itemView.findViewById(R.id.symbol)
+        val image: ImageView = itemView.findViewById(R.id.cardImage)
         val label: TextView = itemView.findViewById(R.id.label)
     }
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) = Holder(parent)
@@ -93,6 +258,15 @@ class PecAdapter(private val items: List<PecCard>, private val onClick: (PecCard
     override fun onBindViewHolder(holder: Holder, position: Int) {
         val item = items[position]
         holder.symbol.text = item.symbol
+        if (item.imageUri != null) {
+            holder.image.setImageURI(Uri.parse(item.imageUri))
+            holder.image.visibility = View.VISIBLE
+            holder.symbol.visibility = View.GONE
+        } else {
+            holder.image.setImageDrawable(null)
+            holder.image.visibility = View.GONE
+            holder.symbol.visibility = View.VISIBLE
+        }
         holder.label.text = item.label
         holder.itemView.contentDescription = item.label
         holder.itemView.setOnClickListener { onClick(item) }
