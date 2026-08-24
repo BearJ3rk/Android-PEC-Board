@@ -1,0 +1,61 @@
+name: Android release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+      - name: Restore release signing key
+        env:
+          PEC_KEYSTORE_BASE64: ${{ secrets.PEC_KEYSTORE_BASE64 }}
+          PEC_KEYSTORE_PATH: ${{ runner.temp }}/pec-board-release.p12
+        run: |
+          test -n "$PEC_KEYSTORE_BASE64"
+          printf '%s' "$PEC_KEYSTORE_BASE64" | base64 --decode > "$PEC_KEYSTORE_PATH"
+      - name: Build signed release APK
+        env:
+          PEC_KEYSTORE_PATH: ${{ runner.temp }}/pec-board-release.p12
+          PEC_KEYSTORE_PASSWORD: ${{ secrets.PEC_KEYSTORE_PASSWORD }}
+          PEC_KEY_ALIAS: ${{ secrets.PEC_KEY_ALIAS }}
+          PEC_KEY_PASSWORD: ${{ secrets.PEC_KEY_PASSWORD }}
+        run: gradle --no-daemon assembleRelease
+      - name: Name release APK
+        id: package
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p outputs
+          apk="outputs/PEC-Board-V${version}.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$apk"
+          echo "apk=$apk" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APK_PATH: ${{ steps.package.outputs.apk }}
+          VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$APK_PATH" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$GITHUB_REF_NAME" "$APK_PATH" \
+              --verify-tag \
+              --title "PEC Board V${VERSION}" \
+              --generate-notes \
+              --repo "$GITHUB_REPOSITORY"
+          fi
