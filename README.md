@@ -2,7 +2,9 @@
 
 An offline-first Android picture exchange communication board. It offers large visual cards, categories, sentence construction, undo/clear controls, and Android text-to-speech.
 
-V0.6 adds **Backup & Restore** to Settings. A complete board—including custom categories, cards, edited defaults, removed-card choices, drag ordering, and uploaded images—can be exported as one ZIP through Android's file picker. Choose Google Drive to keep the backup with a Google account, then restore it on this or a replacement phone. Restoring validates the backup before replacing the current board.
+V0.7 adds a new PEC Board app icon and lets you long-press and drag the category tabs to reorder them. The category order saves automatically and is included in board backups.
+
+V0.6 added **Backup & Restore** to Settings. A complete board—including custom categories, cards, edited defaults, removed-card choices, drag ordering, and uploaded images—can be exported as one ZIP through Android's file picker. Choose Google Drive to keep the backup with a Google account, then restore it on this or a replacement phone. Restoring validates the backup before replacing the current board.
 
 The backup file can contain personal images and is not encrypted by PEC Board, so keep it in a private location. User-created cards, categories, images, ordering, and visibility choices also remain stored during normal APK updates.
 
