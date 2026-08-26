@@ -1,4 +1,4 @@
-# PEC Board V0.6
+# PEC Board V0.7
 
 An offline-first Android picture exchange communication board. It offers large visual cards, categories, sentence construction, undo/clear controls, and Android text-to-speech.
 
