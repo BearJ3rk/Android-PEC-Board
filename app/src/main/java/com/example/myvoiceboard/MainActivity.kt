@@ -1,9 +1,12 @@
 package com.example.myvoiceboard
 
+import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
+import android.view.DragEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -132,6 +135,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 saveCardOrder(currentCategory, adapter.currentItems())
             }
         }).attachToRecyclerView(binding.board)
+        configureCategoryReordering()
         currentCategory = categories.first()
         setCategory(currentCategory)
         rebuildCategoryTabs(currentCategory)
@@ -151,10 +155,89 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 isCheckable = true
                 isChecked = name == selectedCategory
                 minHeight = 48
+                contentDescription = "$name category. Tap to open. Long press and drag to reorder."
                 setOnClickListener { setCategory(name) }
+                setOnLongClickListener { beginCategoryDrag(this, name) }
             }
             binding.categories.addView(chip)
         }
+    }
+
+    private fun configureCategoryReordering() {
+        binding.categories.setOnDragListener { _, event ->
+            val draggedCategory = event.localState as? String
+                ?: return@setOnDragListener false
+            when (event.action) {
+                DragEvent.ACTION_DRAG_STARTED -> draggedCategory in categories
+                DragEvent.ACTION_DRAG_LOCATION -> {
+                    autoScrollCategoryTabs(event.x)
+                    true
+                }
+                DragEvent.ACTION_DROP -> {
+                    moveCategory(draggedCategory, categoryIndexAt(event.x))
+                    true
+                }
+                DragEvent.ACTION_DRAG_ENDED -> {
+                    for (index in 0 until binding.categories.childCount) {
+                        binding.categories.getChildAt(index).alpha = 1f
+                    }
+                    true
+                }
+                else -> true
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun beginCategoryDrag(chip: Chip, category: String): Boolean {
+        val clipData = ClipData.newPlainText("PEC Board category", category)
+        val shadow = View.DragShadowBuilder(chip)
+        val started = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            chip.startDragAndDrop(clipData, shadow, category, 0)
+        } else {
+            chip.startDrag(clipData, shadow, category, 0)
+        }
+        if (started) chip.alpha = 0.55f
+        return started
+    }
+
+    private fun categoryIndexAt(x: Float): Int {
+        if (binding.categories.childCount == 0) return -1
+        var closestIndex = 0
+        var closestDistance = Float.MAX_VALUE
+        for (index in 0 until binding.categories.childCount) {
+            val child = binding.categories.getChildAt(index)
+            val distance = kotlin.math.abs(x - (child.left + child.width / 2f))
+            if (distance < closestDistance) {
+                closestDistance = distance
+                closestIndex = index
+            }
+        }
+        return closestIndex
+    }
+
+    private fun autoScrollCategoryTabs(x: Float) {
+        val scroll = binding.categoryScroll
+        val edge = 48 * resources.displayMetrics.density
+        val visibleLeft = scroll.scrollX.toFloat()
+        val visibleRight = visibleLeft + scroll.width
+        val step = (24 * resources.displayMetrics.density).toInt()
+        when {
+            x < visibleLeft + edge -> scroll.scrollBy(-step, 0)
+            x > visibleRight - edge -> scroll.scrollBy(step, 0)
+        }
+    }
+
+    private fun moveCategory(category: String, targetIndex: Int) {
+        val sourceIndex = categories.indexOf(category)
+        if (sourceIndex < 0 || targetIndex !in categories.indices || sourceIndex == targetIndex) return
+        categories.removeAt(sourceIndex)
+        categories.add(targetIndex, category)
+        saveCategories()
+        rebuildCategoryTabs(currentCategory)
+        binding.categories.announceForAccessibility(
+            "$category moved to position ${targetIndex + 1} of ${categories.size}"
+        )
     }
 
     private fun setCategory(category: String) {
